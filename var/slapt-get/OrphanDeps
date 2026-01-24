@@ -1,0 +1,133 @@
+#!/bin/bash
+
+### User Variables START ###
+# Define exclude list with just package names (no version/build numbers)
+EXCLUDE_LIST=(
+  "exluded-pkg1"
+  "exluded-pkg2"
+  # Add more packages to exclude as needed
+)
+
+### User Variables END ###
+
+
+## Script starts here ##
+
+# Download latest ChangeLog
+if [ -f ChangeLog.txt ]; then
+  rm ./ChangeLog.txt
+fi
+
+echo "Downloading latest Slackware Current Changelog..."
+if ! wget -q https://mirrors.slackware.com/slackware/slackware64-current/ChangeLog.txt; then
+  echo "ERROR: Failed to download ChangeLog.txt"
+  echo "Check your network connection and try again."
+  exit 1
+fi
+
+# Verify the file exists and has content
+if [ ! -f ChangeLog.txt ]; then
+  echo "ERROR: ChangeLog.txt was not created"
+  exit 1
+fi
+
+if [ ! -s ChangeLog.txt ]; then
+  echo "ERROR: ChangeLog.txt is empty"
+  rm ./ChangeLog.txt
+  exit 1
+fi
+
+# Basic sanity check - ChangeLog should contain "Slackware" and date patterns
+if ! grep -q "Slackware" ChangeLog.txt || ! grep -q "UTC [0-9]\{4\}" ChangeLog.txt; then
+  echo "ERROR: ChangeLog.txt appears corrupted or incomplete"
+  rm ./ChangeLog.txt
+  exit 1
+fi
+
+echo "Checking your system for packages that have been removed from Slackware-current..."
+echo "-----------------------------------------------------------------------"
+
+# Array to store found packages
+declare -a found_pkgs
+declare -a excluded_pkgs
+
+# For each installed package
+for installed in /var/log/packages/*; do
+  base_installed=$(basename "$installed")
+  # Extract just the package name (without version, arch, or build number)
+  pkg_name=$(echo "$base_installed" | rev | cut -f4- -d- | rev)
+
+  # Check if the package name is in the exclude list
+  in_exclude_list=0
+  for excluded in "${EXCLUDE_LIST[@]}"; do
+    if [[ "$pkg_name" == "$excluded" ]]; then
+      in_exclude_list=1
+      break
+    fi
+  done
+
+  # Get package name and version, without arch and build number
+  search_pattern=$(echo "$base_installed" | sed 's/-x86_64-[0-9]*$//')
+
+  # Look for removal entries - specifically where "Removed." is on the same line
+  if grep -q "/${search_pattern}-x86_64-[0-9]*\.t[gx]z:.*Removed\." ChangeLog.txt; then
+    echo "Found removed package: $base_installed"
+    if [ $in_exclude_list -eq 1 ]; then
+      echo "This package is in the exclude list and will not be removed."
+      excluded_pkgs+=("$base_installed")
+    else
+      # Store package name for potential removal
+      found_pkgs+=("$base_installed")
+    fi
+
+    # Find the line containing the removal
+    removal_line=$(grep -n "/${search_pattern}-x86_64-[0-9]*\.t[gx]z:.*Removed\." ChangeLog.txt | head -1)
+    line_num=$(echo "$removal_line" | cut -d: -f1)
+
+    # Get any comment lines that follow (lines starting with two spaces)
+    comments=$(awk -v ln="$line_num" 'NR>ln && /^  [^ ]/{print} NR>ln && !/^  [^ ]/{exit}' ChangeLog.txt)
+    if [ ! -z "$comments" ]; then
+      echo "Removal comment:"
+      echo "$comments" | sed 's/^  //'
+    fi
+
+    # Get the date
+    date=$(head -n $line_num ChangeLog.txt | grep -B50 "/${search_pattern}" | grep "UTC [0-9]\{4\}" | tail -1)
+    echo "Removed on: $date"
+    echo "-----------------------------------------------------------------------"
+  fi
+done
+
+# If we found any packages, offer to remove them
+if [ ${#found_pkgs[@]} -gt 0 ]; then
+  echo "Found ${#found_pkgs[@]} package(s) that have been removed from Slackware-current."
+  if [ ${#excluded_pkgs[@]} -gt 0 ]; then
+    echo "Excluded ${#excluded_pkgs[@]} package(s) from removal:"
+    printf "  %s\n" "${excluded_pkgs[@]}"
+  fi
+  echo "Would you like to remove the non-excluded packages? [y/N]"
+  read -r answer
+  if [[ $answer =~ ^[Yy] ]]; then
+    # Check if slapt-get is available
+    if ! command -v slapt-get >/dev/null 2>&1; then
+      echo "Error: slapt-get is not installed. Please install it first."
+      exit 1
+    fi
+
+    for pkg in "${found_pkgs[@]}"; do
+      echo "Removing $pkg..."
+      pkg_name=$(echo "$pkg" | rev | cut -f4- -d- | rev)
+      slapt-get --remove "$pkg_name" -y
+    done
+  else
+    echo "No packages removed."
+  fi
+elif [ ${#excluded_pkgs[@]} -gt 0 ]; then
+  echo "Found ${#excluded_pkgs[@]} removed package(s), but all are in the exclude list:"
+  printf "  %s\n" "${excluded_pkgs[@]}"
+  echo "No packages will be removed."
+else
+  echo "No installed packages identified as removed from Slackware-current mainline"
+  echo
+  echo
+fi

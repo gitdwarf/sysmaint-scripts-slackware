@@ -1,0 +1,49 @@
+#!/bin/bash
+
+fn_upgrade () {
+  upgradepkg ${all} *.t?z
+  upgradepkg ${all} */*.t?z
+  upgradepkg ${all} */*/*.t?z
+  upgradepkg ${all} */*/*/*.t?z
+  upgradepkg ${all} */*/*/*/*.t?z
+  upgradepkg ${all} */*/*/*/*/*.t?z
+}
+
+ls -lart /var/lib/pkgtools/packages/*
+
+cd 32multi
+#if ! diff -q current/PACKAGES.TXT PACKAGES-OLD.TXT
+#then
+  export all=""
+  fn_upgrade
+#fi
+cd ..
+
+# Define exclusions
+excludes="package_data UpdateAll OrphanDeps 32multi FileList slackware64"
+
+# Create slackware64 if it doesn't exist
+if [[ ! -d slackware64 ]]; then
+  mkdir slackware64
+fi
+# Move everything except exclusions into slackware64
+for file in *; do
+  skip=0
+  for exclude in $excludes; do
+    [[ "$file" == "$exclude" ]] && skip=1
+  done
+  [[ $skip -eq 0 ]] && mv "$file" slackware64/
+done
+
+# Proceed with upgrade
+cd slackware64
+export all="-ir"
+fn_upgrade
+cd ..
+
+echo
+./OrphanDeps
+echo
+if command -v needrestart ; then
+needrestart -r a
+fi
