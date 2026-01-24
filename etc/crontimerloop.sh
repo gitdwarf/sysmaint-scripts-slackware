@@ -28,9 +28,7 @@ ctl-fn_timeoutloop() {
   shift 3
 
   # Invalid usage
-  if [ -z "$name" ] || [ -z "$timeout_secs" ] || [ -z "$max_attempts" ] || [ $# -eq 0 ]; then
-    return 1
-  fi
+  [ -z "$name" ] || [ -z "$timeout_secs" ] || [ -z "$max_attempts" ] || [ $# -eq 0 ] && return 1
 
   # Detect string vs argv mode
   if [ $# -eq 1 ]; then
@@ -43,18 +41,23 @@ ctl-fn_timeoutloop() {
   attempt=1
   while [ "$attempt" -le "$max_attempts" ]; do
 
+    tmpfile="$(mktemp)"
+
     if [ "$mode" = "string" ]; then
-      output=$(timeout "$timeout_secs" sh -c "$cmd_string" 2>&1)
-      rc=$?
+      # STREAM output live, CAPTURE via tee, PRESERVE exit code
+      timeout "$timeout_secs" sh -c "$cmd_string" 2>&1 | tee "$tmpfile"
+      rc=${PIPESTATUS[0]}
     else
-      output=$(timeout "$timeout_secs" "$@" 2>&1)
-      rc=$?
+      timeout "$timeout_secs" "$@" 2>&1 | tee "$tmpfile"
+      rc=${PIPESTATUS[0]}
     fi
+
+    output="$(cat "$tmpfile")"
+    rm -f "$tmpfile"
 
     case "$rc" in
       0)
-        # SUCCESS: print wrapped command output to stdout
-        printf "%s\n" "$output"
+        # SUCCESS — output already streamed live
         return 0
         ;;
 
@@ -65,9 +68,6 @@ ctl-fn_timeoutloop() {
         fi
 
         if [ "$attempt" -eq "$max_attempts" ]; then
-          # Print wrapped command output to stdout
-          printf "%s\n" "$output"
-          # Print timeoutloop's own error to stderr
           echo "ERROR: $name timed out after $max_attempts attempts" >&2
           return 124
         fi
@@ -79,9 +79,6 @@ ctl-fn_timeoutloop() {
           on_failure "$name" "$attempt" "$rc" "$@"
         fi
 
-        # Print wrapped command output to stdout
-        printf "%s\n" "$output"
-        # Print timeoutloop's own error to stderr
         echo "ERROR: $name failed with exit code $rc" >&2
         return "$rc"
         ;;
@@ -92,4 +89,3 @@ ctl-fn_timeoutloop() {
 
   return 1
 }
-
