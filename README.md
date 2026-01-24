@@ -1,18 +1,6 @@
 # sysmaint-scripts-slackware
 
-Automated Slackware system maintenance scripts for updating packages, managing dependencies, and assisting with window management during updates.
-
-These scripts are designed to run regularly (e.g., via cron) or manually, and are tailored for Slackware systems using **slapt-get** as the package manager.
-
----
-
-## Features
-
-* Automatically update Slackware packages using `slapt-get`.
-* Handle HTTP download errors, MD5 mismatches, and problematic sources automatically.
-* Optional integration with `needrestart` for restarting services after updates.
-* Moves file manager windows to a specific workspace after updates (via `wmctrl` or `xdotool`).
-* Designed to run safely unattended, with careful handling of exclusions, backups, and retries.
+Automated system maintenance scripts for Slackware, including package updates, Perl module updates, and Python PIP module updates.
 
 ---
 
@@ -20,72 +8,103 @@ These scripts are designed to run regularly (e.g., via cron) or manually, and ar
 
 ### Required
 
-* **slapt-get**
-  Dependency for all scripts; used for updating and managing packages on Slackware.
-  **Slackpkg or other update tools are not compatible.**
+* **slapt-get** – Slackware package manager extension for dependency handling and updates.
   Installation & info: [https://github.com/jaos/slapt-get](https://github.com/jaos/slapt-get)
 
-### Optional
+* **Perl** – Base Perl interpreter. The `perthings` script updates Perl modules via CPAN.
+  Optional CPAN utilities may include `cpan-outdated`.
 
-* **needrestart**
-  Detects services that require a restart after updates. Useful for fully automated maintenance.
+* **Python & pip** – Base Python interpreter. The `pipthings` script updates Python packages via `pip-review`.
+
+### Optional / Recommended
+
+* **needrestart** – Detects services that need restarting after package updates.
   Installation & info: [https://github.com/liske/needrestart](https://github.com/liske/needrestart)
 
-* **wmctrl** (X11 window management)
-  Used by `windowlabelandmove.sh` to move file manager windows to a specific workspace.
-  SlackBuild: [https://slackbuilds.org/result/?search=+wmctrl&sv=](https://slackbuilds.org/result/?search=+wmctrl&sv=)
-  Alternative / upstream source: [https://github.com/dancor/wmctrl](https://github.com/dancor/wmctrl)
+* **wmctrl** – Moves open file manager windows to specific workspaces.
+  SlackBuild: [https://slackbuilds.org/result/?search=wmctrl&sv=](https://slackbuilds.org/result/?search=wmctrl&sv=)
+  Alternative / upstream: [https://github.com/dancor/wmctrl](https://github.com/dancor/wmctrl)
 
-* **xdotool** (XWayland / Wayland fallback)
-  Optional fallback for moving windows when `wmctrl` is unavailable or in mixed XWayland setups.
+* **xdotool** – Alternative for moving windows in XWayland or Wayland via XWayland.
 
 ---
 
-## Installation
+## Included Scripts
 
-1. Clone or download the repository:
+### 1. System Updates (`sysmaint-scripts-slackware`)
 
-```bash
-git clone https://github.com/yourusername/sysmaint-scripts-slackware.git
-cd sysmaint-scripts-slackware
-```
+* Uses `slapt-get` to update system packages.
+* Handles:
 
-2. Ensure `slapt-get` is installed and configured with your Slackware sources.
+  * MD5 mismatches
+  * HTTP errors
+  * Excluded packages and sources
+* Supports moving the file manager window to a specific workspace for visibility.
 
-3. Make scripts executable:
-
-```bash
-chmod +x *.sh
-```
-
-4. Configure `windowlabelandmove.sh` if you wish to use the workspace automation feature.
-
----
-
-## Usage
-
-Run scripts manually or schedule via cron. Example:
+Example usage:
 
 ```bash
-/path/to/sysmaint-scripts-slackware/update-system.sh
+windowtomoveto="4"
+wintomv="/path/to/package/dir"
+. /etc/windowlabelandmove.sh
+wlm-fn_windowlabelandmove
 ```
 
-* `update-system.sh` handles downloading, upgrading, and resolving errors.
-* `windowlabelandmove.sh` is a helper script for window management, called internally as needed.
+### 2. Perl Module Updates (`perthings`)
+
+* Updates Perl modules via `cpan`.
+* Excludes modules listed in `ExcludedModules`.
+* Attempts updates up to 5 times to handle dependency chains.
+* Tracks:
+
+  * Modules successfully updated
+  * Excluded modules installed
+  * Excluded modules not installed
+  * Failed updates
+
+Configure excluded modules:
+
+```bash
+ExcludedModules="Image::Magick,ExtUtils::Command,ExtUtils::Install,File::Temp,DBD::mysql,Time::Piece"
+```
+
+Run script:
+
+```bash
+./perthings.sh
+```
+
+### 3. Python PIP Updates (`pipthings`)
+
+* Updates Python packages via `pip-review`.
+* Clears pip cache on each attempt.
+* Loops up to 5 times to handle recursive dependency installations.
+* Skips if everything is already up-to-date.
+
+Run script:
+
+```bash
+./pipthings.sh
+```
 
 ---
 
 ## Notes
 
-* Scripts are designed for **Slackware** only.
-* Workspace management with `wmctrl` / `xdotool` is **best-effort**; failures are silently ignored.
-* All updates are performed **safely**, with backups and exclusion handling for problematic packages.
-* Designed for unattended operation, e.g., scheduled overnight.
+* The scripts are designed for unattended execution (e.g., cron jobs), but some display behavior (workspace/window moves) may require a running X server.
+* Excluded modules/packages allow safe skipping of critical or problematic items.
+* The scripts use `set -euo pipefail` for strict error handling wherever appropriate.
+* To remove a Perl module manually:
+
+```bash
+perldoc -l Module::Name
+rm -rf /path/to/module.pm
+```
 
 ---
 
 ## License
 
-MIT License. See LICENSE file for details.
+MIT License – see the `LICENSE` file for details.
 
 ---
