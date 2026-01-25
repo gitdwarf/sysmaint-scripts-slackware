@@ -21,6 +21,9 @@
 #   *   — underlying command’s exit code (non-timeout failure)
 #
 
+
+## Script starts here ##
+
 ctl-fn_timeoutloop() {
   name="$1"
   timeout_secs="$2"
@@ -89,3 +92,5 @@ ctl-fn_timeoutloop() {
 
   return 1
 }
+
+## Script ends ##
