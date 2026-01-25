@@ -1,96 +1,171 @@
-#!/bin/sh
-#
-# crontimerloop - this script: root retry-with-timeout helper
-#
-# Provides:
-#   timeoutloop <commandname> <timeout_seconds> <max_attempts> <command...>
-#
-# Optional user-defined hooks:
-#   on_timeout <attempt> <max_attempts> <command...>
-#   on_failure <attempt> <exit_code> <command...>
-#
-# Hooks:
-#   - Called automatically when defined.
-#   - Not required; crontimeloop checks before calling.
-#   - Never interfere with retry logic unless you choose to exit inside them.
-#
-# Exit codes:
-#   0   — success
-#   1   — all attempts failed
-#   124 — timeout (from `timeout`)
-#   *   — underlying command’s exit code (non-timeout failure)
-#
+#!/bin/bash
+
+# Checks SMART status on drives, aggressively alerts if problems found,
+# then performs TRIM and XFS defrag if relevant on specified drives
+# if (and only if) ALL drives report healthy.
+
+### User Variables START ###
+machineID="MachineID" # Your computer/server name or ID
+notifyemail="YOUREMAILHERE" # eg you@example.com
+xfsdrives="/dev/xfshdd1 /dev/xfshdd2" # These are any XFS formatted spinning disk HDDs you may have (space seperated). DO NOT put SSDs here, they will be ignored.
+unmounteddrvs="/dev/unmounteddrv1 /dev/unmounteddrv2" # These are any normally unmounted fixed partitions or drives you may have eg. hot spares or recovery/rescue partions (space seperated).
+mountbase="/scratch/mount/point"  # Scratch mount point to mount the above unmounted drives/partions.
+testmode=0 # Change to 1 if you want to temporarily test the alert system.
+
+### User Variables END ###
 
 
 ## Script starts here ##
 
-ctl-fn_timeoutloop() {
-  name="$1"
-  timeout_secs="$2"
-  max_attempts="$3"
-  shift 3
+set -euo pipefail
+shopt -s nullglob
 
-  # Invalid usage
-  [ -z "$name" ] || [ -z "$timeout_secs" ] || [ -z "$max_attempts" ] || [ $# -eq 0 ] && return 1
+# If uservars unchanged, set them to sensible defaults
+[ "${notifyemail}" == "YOUREMAILHERE" ] && notifyemail="root"
+[ "${machineID}" == "MachineID" ] && machineID="Your Computer"
+[ "${xfsdrives}" == "/dev/xfshdd1 /dev/xfshdd2" ] && xfsdrives=""
+[ "${unmounteddrvs}" == "/dev/unmounteddrv1 /dev/unmounteddrv2" ] && unmounteddrvs=""
+[ "${mountbase}" == "/scratch/mount/point" ]  && mkdir -p /tmp/drvchkmount && mountbase=/tmp/drvchkmount
+alert_email=""
+alert_emailsubject=""
+baddrive=0
+wayland=0
+smartctltest="PASSED"
 
-  # Detect string vs argv mode
-  if [ $# -eq 1 ]; then
-    mode="string"
-    cmd_string="$1"
-  else
-    mode="argv"
+# Detect any Wayland sessions
+for de in $(loginctl list-sessions --no-legend | awk '{print $1}'); do
+  [ "$(loginctl show-session "${de}" -p Type --value)" = "wayland" ] && { wayland=1; break 1; }
+done
+
+# Notification daemons
+wayland_daemons=(mako waybar-notify)
+x_daemons=(
+  "/usr/lib64/xfce4/notifyd/xfce4-notifyd"
+  "dunst"
+  "mate-notification-daemon"
+  "notify-osd"
+)
+
+fn_smartcheck() {
+  # Check SMART support
+  if [ "${testmode}" == "1" ] ; then
+  smartctltest="FAILED"
   fi
+  if smartctl -i "${drivecheck}" 2>/dev/null | grep -q "SMART support is: Available"; then
+    if ! smartctl -H "${drivecheck}" | grep -q "${smartctltest}"; then
+      baddrive=1
+      alert_alert="ALERT! ALERT! ALERT! ALERT!"
+      alert_txt="Drive ${drivecheck} reporting SMART error!"
+      alert_combined="\n  ${alert_alert} \n\n${alert_txt} \n\n  ${alert_alert} \n"
 
-  attempt=1
-  while [ "$attempt" -le "$max_attempts" ]; do
+      alert_email="${alert_email} ${alert_combined}"
+      alert_emailsubject="CRITICAL ERROR ALERT ON A DRIVE ON ${machineID}"
 
-    tmpfile="$(mktemp)"
+      # Start all notification daemons (silently ignore any that arent installed and so fail to start)
+      [ "${wayland}" = "1" ] && for daemon in "${wayland_daemons[@]}"; do "${daemon}" &>/dev/null & done
+      for daemon in "${x_daemons[@]}"; do "${daemon}" &>/dev/null & done
 
-    if [ "$mode" = "string" ]; then
-      # STREAM output live, CAPTURE via tee, PRESERVE exit code
-      timeout "$timeout_secs" sh -c "$cmd_string" 2>&1 | tee "$tmpfile"
-      rc=${PIPESTATUS[0]}
-    else
-      timeout "$timeout_secs" "$@" 2>&1 | tee "$tmpfile"
-      rc=${PIPESTATUS[0]}
+      # Notify all logged-in GUI sessions
+      users=$(who | awk '{print $1}' | sort -u)
+      for user in $users; do
+        runuser -u "$user" -- notify-send -u critical "              HDD SMART ALERT!" $"${alert_combined}" &>/dev/null &
+        runuser -u "$user" -- zenity --error --text=$"${alert_combined}" &>/dev/null &
+      done
+
+      # Send alert to all logged in terminals and TTYs too
+      # Pseudo-terminals (ssh, xterm, tmux, etc)
+      for pts in /dev/pts/[0-9]*; do
+        [ -w "$pts" ] && printf "%b\n" $"${alert_combined}" > "$pts" 2>/dev/null
+      done
+
+      # Real virtual terminals (tty1–tty63)
+      for tty in /dev/tty[0-9]*; do
+        [ -w "$tty" ] && printf "%b\n" $"${alert_combined}" > "$tty" 2>/dev/null
+      done
+
     fi
+  else
+    echo "Skipping ${drivecheck} - SMART not supported"
+  fi
+}
 
-    output="$(cat "$tmpfile")"
-    rm -f "$tmpfile"
+fn_xfsdrvs() {
+  xfsoutput=$(xfs_fsr "${drive}" 2>&1 | grep -v "start inode=0" || true)
+  if [ -n "${xfsoutput}" ]; then
+    xfsalert="There was an error or warning when running xfs_fsr on drive ${drive}: ${xfsoutput}"
+    alert_email="${alert_email} ${xfsalert}"
+    alert_emailsubject="${machineID} xfs_fsr error or warning"
+  fi
+}
 
-    case "$rc" in
-      0)
-        # SUCCESS — output already streamed live
-        return 0
-        ;;
+echo "Checking SMART status on drives"
 
-      124)
-        # TIMEOUT
-        if command -v on_timeout >/dev/null 2>&1; then
-          on_timeout "$name" "$attempt" "$max_attempts" "$@"
-        fi
+# NVMe
+nvme_drives=(/dev/nvme?n?)
+if [ ${#nvme_drives[@]} -ne 0 ]; then
+  for drivecheck in "${nvme_drives[@]}"; do
+    fn_smartcheck
+  done
+fi
 
-        if [ "$attempt" -eq "$max_attempts" ]; then
-          echo "ERROR: $name timed out after $max_attempts attempts" >&2
-          return 124
-        fi
-        ;;
+# SATA / USB
+sd_drives=(/dev/sd?)
+if [ ${#sd_drives[@]} -ne 0 ]; then
+  for drivecheck in "${sd_drives[@]}"; do
+    fn_smartcheck
+  done
+fi
 
-      *)
-        # NON-TIMEOUT FAILURE
-        if command -v on_failure >/dev/null 2>&1; then
-          on_failure "$name" "$attempt" "$rc" "$@"
-        fi
-
-        echo "ERROR: $name failed with exit code $rc" >&2
-        return "$rc"
-        ;;
-    esac
-
-    attempt=$((attempt + 1))
+# If all drives healthy, perform TRIM / XFS defrag
+if [ "${baddrive}" -eq 0 ]; then
+  # Mount unmounted drives and TRIM them
+  for drv in "${unmounteddrvs[@]}"; do
+    if ! mount | grep -q "on ${mountbase} "; then
+      mount "${drv}" "${mountbase}"
+      while ! mount | grep -q "${drv} "; do sleep 0.5; done
+      /sbin/fstrim "${mountbase}" --verbose --quiet
+      umount "${mountbase}"
+      while mount | grep -q "${drv} "; do sleep 0.5; done
+    else
+      echo "Mount point ${mountbase} already in use - unmounted ${drv} TRIM skipped"
+    fi
   done
 
-  return 1
-}
+  # TRIM all compatable mounted drives
+  /sbin/fstrim --all --verbose --quiet
+
+  # Defrag any XFS drives (only rotational)
+  if ! pgrep -i xfs_fsr >/dev/null; then
+    for drive in ${xfsdrives}; do
+      # Check if drive is rotational
+      is_rot=$(lsblk -d -o rota -n "${drive}" | tr -d ' ')
+      if [ "${is_rot}" -eq 1 ]; then
+        # Only defrag if not already mounted and mount point free
+        if ! mount | grep -q "${drive} "; then
+          if ! mount | grep -q "on ${mountbase} "; then
+            mount "${drive}" "${mountbase}"
+            while ! mount | grep -q "${drive} "; do sleep 0.5; done
+            fn_xfsdrvs
+            umount "${mountbase}"
+            while mount | grep -q "${drive} "; do sleep 0.5; done
+          else
+            echo "Mount point ${mountbase} in use - ${drive} defrag skipped"
+          fi
+        else
+          fn_xfsdrvs
+        fi
+      else
+        echo "Drive ${drive} is SSD or non-spinning, skipping defrag"
+      fi
+    done
+    echo "Defrag completed for drives: ${xfsdrives}"
+  else
+    echo "xfs_fsr already running - skipping defrag"
+  fi
+fi
+
+# Send alert email if needed
+alert_email="$(printf "%b\n" $"${alert_email}")"
+[ -n "${alert_emailsubject}" ] && mail -s "${alert_emailsubject}" "${notifyemail}" <<< $"${alert_email}"
 
 ## Script ends ##
