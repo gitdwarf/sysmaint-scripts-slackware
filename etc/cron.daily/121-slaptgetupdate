@@ -20,15 +20,16 @@ if [ -f "/tmp/slapt-get-done" ]; then
   rm /tmp/slapt-get-done
 fi
 if ! cd "${pkgdir}"; then
-echo "unable to cd to ${pkgdir}"
-echo "aborting!"
-echo
-echo
-exit 1
+  echo "unable to cd to ${pkgdir}"
+  echo "aborting!"
+  echo
+  echo
+  exit 1
 fi
 
 exclusions_modified=0
 original_excludes=""
+wintomv=""
 sources_modified=0
 original_sources=""
 disabled_sources_list=""
@@ -41,17 +42,14 @@ fn_main_loop () {
   if echo "$update_output" | grep -q "Sources failed to download, correct sources and rerun --update"; then
     fn_update_error
   fi
+
   fn_upgrade
-#echo
-#echo "$log_output"
-#echo
   if echo "$log_output" | grep -q "MD5 checksum mismatch"; then
     fn_md5_mismatch
-  elif echo "$log_output" | grep -qE "Failed to download: ${download_error}"
-  then
+  elif echo "$log_output" | grep -qE "Failed to download: ${download_error}" ; then
     fn_http_error
     fn_main_loop
-    elif echo "$log_output" | grep -q "OTHER ERROR"; then
+  elif echo "$log_output" | grep -q "OTHER ERROR"; then
     echo "Not Handling OTHER ERROR"
   fi
 }
@@ -65,22 +63,21 @@ fn_reset_downloads () {
   then
 	  rm -r * 2>/dev/null
   fi
-  if [ "$(ls -A | grep '^\.')" ]
-  then
+  if [ "$(ls -A | grep '^\.')" ] ; then
   	rm -r .* 2>/dev/null
   fi
   mv /tmp/UpdateAll ${pkgdir}/ 2>/dev/null
   mv /tmp/OrphanDeps ${pkgdir}/ 2>/dev/null
   mv /tmp/32multi ${pkgdir}/ 2>/dev/null
 
-  return
+  return 0
 }
 
-fn_update() {
+fn_update () {
   update_output=$(ctl-fn_timeoutloop "slapt-get --update" 600 3 \
-    "slapt-get --update" 2>&1)
+    "slapt-get --update" 2>&1 || true )
   rc=$?
-
+echo "${update_output}" | tail -n 1
   if [ $rc -eq 124 ]; then
     echo "$update_output" | tail -n 1
     fn_restore_exclusions
@@ -93,7 +90,7 @@ fn_update() {
 
 fn_upgrade() {
   log_output=$(ctl-fn_timeoutloop "slapt-get --upgrade" 1800 3 \
-    "slapt-get --upgrade --ignore-dep --download-only" 2>&1)
+    "slapt-get --upgrade --ignore-dep --download-only" 2>&1 || true )
   rc=$?
 
   if [ $rc -eq 124 ]; then
@@ -249,18 +246,18 @@ fn_restore_exclusions () {
 }
 
 fn_pkgtools-update_check () {
-if slapt-get --search pkgtools  | grep -w "pkgtools" | grep -v slapt-get | grep inst=no
-then
-  upgradepkgloc="/sbin/upgradepkg"
-	echo "New pkgtools available,"
-	echo "updating to new pkgtools"
-	slapt-get --install pkgtools -y > /dev/null 2>&1
-  echo "backing up new ${upgradepkgloc}"
-  cp -a ${upgradepkgloc} ${customtoolsrootloc}${upgradepkgloc}-new
-  echo "replacing new ${upgradepkgloc} with customised version"
-  cp -a ${customtoolsrootloc}${upgradepkgloc} ${upgradepkgloc}
-  echo "removing pkgtools from ${pkgdir}"
-  find "${pkgdir}" -type f -name 'pkgtools*' -exec rm {} \;
+ if slapt-get --search pkgtools  | grep -w "pkgtools" | grep -v slapt-get | grep inst=no ; then
+    upgradepkgloc="/sbin/upgradepkg"
+	  echo "New pkgtools available,"
+  	echo "updating to new pkgtools"
+	  slapt-get --install pkgtools -y > /dev/null 2>&1
+    echo "backing up new ${upgradepkgloc}"
+    cp -a ${upgradepkgloc} ${customtoolsrootloc}${upgradepkgloc}-new
+    echo "replacing new ${upgradepkgloc} with customised version"
+    cp -a ${customtoolsrootloc}${upgradepkgloc} ${upgradepkgloc}
+    echo "removing pkgtools from ${pkgdir}"
+    find "${pkgdir}" -type f -name 'pkgtools*' -exec rm {}
+  fi
 }
 
 fn_java_check () {
@@ -271,38 +268,38 @@ fn_java_check () {
 }
 
 fn_mozjs-update_check () {
-# Get all mozjs packages and their installation status
-mozjs_output=$(slapt-get --search mozjs)
+  # Get all mozjs packages and their installation status
+  mozjs_output=$(slapt-get --search mozjs)
 
-# Extract version numbers from installed and available packages
-installed_MozJS_version=""
-available_MosJS_versions=()
+  # Extract version numbers from installed and available packages
+  installed_mozjs_version=""
+  available_mozjs_versions=()
 
-while IFS= read -r line; do
-	if [[ $line =~ mozjs([0-9]+)-[0-9]+\.[0-9]+\.[0-9]+.*\[inst=yes\] ]]; then
-		installed_MozJS_version="${BASH_REMATCH[1]}"
-	elif [[ $line =~ mozjs([0-9]+)-[0-9]+\.[0-9]+\.[0-9]+.*\[inst=no\] ]]; then
-		available_MosJS_versions+=("${BASH_REMATCH[1]}")
-	fi
-done <<< "$mozjs_output"
+  while IFS= read -r line; do
+	  if [[ $line =~ mozjs([0-9]+)-[0-9]+\.[0-9]+\.[0-9]+.*\[inst=yes\] ]]; then
+  		installed_mozjs_version="${BASH_REMATCH[1]}"
+	  elif [[ $line =~ mozjs([0-9]+)-[0-9]+\.[0-9]+\.[0-9]+.*\[inst=no\] ]]; then
+  		available_mozjs_versions+=("${BASH_REMATCH[1]}")
+	  fi
+  done <<< "$mozjs_output"
 
-# Check if there's a newer MozJS version available
-newer_Mos_JS_available=false
-if [[ -n "$installed_MozJS_version" ]]; then
-	for MozJS_version in "${available_MozJS_versions[@]}"; do
-		if (( MozJS_version > installed_MozJS_version )); then
-			newer_MozJS_available=true
-			break
-		fi
-	done
-fi
+  # Check if there's a newer version available
+  newer_mozjs_available=false
+  if [[ -n "$installed_mozjs_version" ]]; then
+  	for mozjs_version in "${available_mozjs_versions[@]}"; do
+  		if (( mozjs_version > installed_mozjs_version )); then
+  			newer_mozjs_available=true
+  			break
+  		fi
+  	done
+  fi
 
-if $newer_MozJS_available; then
-	echo "Newer MozJS available,"
-	echo "recommend uninstalling the old and installing the new one"
-	echo
-	echo
-fi
+  if $newer_mozjs_available; then
+  	echo "New MozJS available,"
+  	echo "recommend uninstalling the old and installing the new one"
+  	echo
+  	echo
+  fi
 }
 
 fn_main_loop
@@ -313,10 +310,8 @@ fn_mozjs-update_check
 
 echo
 excludes="$(ls | grep -v 'package_data' | grep -v 'UpdateAll' | grep -v 'OrphanDeps' | grep -v '32multi')"
-if [[ ${excludes} ]]
-then
-  if [[ ! -f /tmp/multilib_updates ]]
-  then
+if [[ ${excludes} ]] ; then
+  if [[ ! -f /tmp/multilib_updates ]] ; then
     export windowtomoveto
     export wintomv=${pkgdir}
     wlm-fn_windowlabelandmove
@@ -331,3 +326,5 @@ else
 fi
 echo
 echo
+
+## Script ends ##
