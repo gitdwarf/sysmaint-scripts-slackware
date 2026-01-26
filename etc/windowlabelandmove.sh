@@ -19,13 +19,35 @@ unsafemode=0 # Default: SAFE MODE
 set -euo pipefail
 wintomv=""
 
+
 # --- Core window mover (used in unsafe mode) ---
-wlm-fn_windowlabelandmove() {
+wlm-fn_windowlabelandmove () {
+  # --- MAIN MODESWITCH ---
+  if [ "$unsafemode" -eq 1 ]; then
+    wlm-fn_unsafe_mode
+  else
+    wlm-fn_safe_mode
+  fi
+}
+
+# --- SAFE MODE: run GUI actions as logged-in users ---
+wlm-fn_safe_mode () {
+  users=$(who | awk '{print $1}' | sort -u)
+
+  for user in $users; do
+    runuser -u "$user" -- sh -c "
+      export DISPLAY=:0
+      xdg-open "$wintomv" >/dev/null 2>&1 &
+    " >/dev/null 2>&1 || true
+  done
+}
+
+# --- UNSAFE MODE: run GUI actions as root (dangerous) ---
+wlm-fn_unsafe_mode () {
   export DISPLAY=:0
 
   # Adjust workspace index
   windowtomoveto=$((windowtomoveto - 1))
-
   # Open file manager
   xdg-open "$wintomv" >/dev/null 2>&1 &
   sleep 1
@@ -38,28 +60,5 @@ wlm-fn_windowlabelandmove() {
   fi
 }
 
-# --- SAFE MODE: run GUI actions as logged-in users ---
-wlm-fn_safe_mode() {
-  users=$(who | awk '{print $1}' | sort -u)
-
-  for user in $users; do
-    runuser -u "$user" -- sh -c "
-      export DISPLAY=:0
-      xdg-open \"$wintomv\" >/dev/null 2>&1 &
-    " >/dev/null 2>&1 || true
-  done
-}
-
-# --- UNSAFE MODE: run GUI actions as root (dangerous) ---
-wlm-fn_unsafe_mode() {
-  wlm-fn_windowlabelandmove
-}
-
-# --- MAIN MODESWITCH ---
-if [ "$unsafemode" -eq 1 ]; then
-  wlm-fn_unsafe_mode
-else
-  wlm-fn_safe_mode
-fi
 
 ## Script ends ##
