@@ -6,7 +6,7 @@
 # Note: will silently fail if unable to move window
 
 ### User Variables START ###
-unsafemode=0 # Default: SAFE MODE
+unsafemode=1 # Default: SAFE MODE
 # DO NOT set this to 1 unlesss you are
 # willing to accept having root-owned
 # file manager windows open on users desktops
@@ -20,7 +20,7 @@ set -euo pipefail
 wintomv=""
 
 
-# --- Core window mover (used in unsafe mode) ---
+# --- Core window mover ---
 wlm-fn_windowlabelandmove () {
   # --- MAIN MODESWITCH ---
   if [ "$unsafemode" -eq 1 ]; then
@@ -30,7 +30,7 @@ wlm-fn_windowlabelandmove () {
   fi
 }
 
-# --- SAFE MODE: run GUI actions as logged-in users ---
+# --- SAFE MODE: run GUI actions as logged-in user ---
 wlm-fn_safe_mode () {
   users=$(who | awk '{print $1}' | sort -u)
 
