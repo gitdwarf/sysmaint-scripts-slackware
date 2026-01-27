@@ -6,7 +6,7 @@
 # Note: will silently fail if unable to move window
 
 ### User Variables START ###
-unsafemode=1 # Default: SAFE MODE
+unsafemode=0 # Default: SAFE MODE
 # DO NOT set this to 1 unlesss you are
 # willing to accept having root-owned
 # file manager windows open on users desktops
