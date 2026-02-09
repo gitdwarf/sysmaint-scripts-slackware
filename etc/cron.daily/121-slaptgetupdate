@@ -254,16 +254,16 @@ fn_pkgtools-update_check () {
     echo "backing up new ${upgradepkgloc}"
     cp -a ${upgradepkgloc} ${customtoolsrootloc}${upgradepkgloc}-new
     echo "replacing new ${upgradepkgloc} with customised version"
-    cp -a ${customtoolsrootloc}${upgradepkgloc} ${upgradepkgloc}
+    cp -a "${customtoolsrootloc}${upgradepkgloc}" "${upgradepkgloc}"
     echo "removing pkgtools from ${pkgdir}"
-    find "${pkgdir}" -type f -name 'pkgtools*' -exec rm {}
+    find "${pkgdir}" -type f -name 'pkgtools*' -delete
   fi
 }
 
 fn_java_check () {
   if downloaded_java=$(ls -d openjdk* 2>/dev/null | grep -o '[0-9]\+'); then
     installed_java=$(java -version 2>&1 | awk -F[\".] '/version/ {print $2}')
-    if [ "$installed_java" -ge "$downloaded_java" ] ; then rm -rf "openjdk*" ; fi
+    if [ "${installed_java}" -ge "${downloaded_java}" ] ; then rm -rf ./openjdk* ; fi
   fi
 }
 
