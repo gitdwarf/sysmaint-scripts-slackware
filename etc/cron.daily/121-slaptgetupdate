@@ -38,9 +38,8 @@ download_error="(HTTP response code said error|\
 Failure when receiving data from the peer)"
 
 fn_main_loop () {
-#  fn_reset_downloads
-#  fn_update
-update_output=""
+  fn_reset_downloads
+  fn_update
   if echo "$update_output" | grep -q "Sources failed to download, correct sources and rerun --update"; then
     fn_update_error
   fi
