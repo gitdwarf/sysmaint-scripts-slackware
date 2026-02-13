@@ -33,12 +33,14 @@ wintomv=""
 sources_modified=0
 original_sources=""
 disabled_sources_list=""
+excludes=""
 download_error="(HTTP response code said error|\
 Failure when receiving data from the peer)"
 
 fn_main_loop () {
-  fn_reset_downloads
-  fn_update
+#  fn_reset_downloads
+#  fn_update
+update_output=""
   if echo "$update_output" | grep -q "Sources failed to download, correct sources and rerun --update"; then
     fn_update_error
   fi
@@ -77,7 +79,6 @@ fn_update () {
   update_output=$(ctl-fn_timeoutloop "slapt-get --update" 600 3 \
     "slapt-get --update" 2>&1 || true )
   rc=$?
-echo "${update_output}" | tail -n 1
   if [ $rc -eq 124 ]; then
     echo "$update_output" | tail -n 1
     fn_restore_exclusions
@@ -309,15 +310,14 @@ fn_java_check
 fn_mozjs-update_check
 
 echo
-excludes="$(ls | grep -v 'package_data' | grep -v 'UpdateAll' | grep -v 'OrphanDeps' | grep -v '32multi')"
-if [[ ${excludes} ]] ; then
+excludes="$(ls | grep -v 'package_data' | grep -v 'UpdateAll' | grep -v 'OrphanDeps' | grep -v '32multi' || true)"
+if [ "${excludes}" ] ; then
   if [[ ! -f /tmp/multilib_updates ]] ; then
     export windowtomoveto
     export wintomv=${pkgdir}
     wlm-fn_windowlabelandmove
   else
-  rm /tmp/multilib_updates
-
+    rm /tmp/multilib_updates
   fi
   ls -R ${excludes} > FileList
   echo "There are system updates to check over and install"
