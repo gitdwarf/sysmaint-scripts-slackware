@@ -2,7 +2,7 @@
 
 ### User Variables START ###
 customtoolsrootloc="/SETAPATH_NO_TRAILING_SLASH"
-windowtomoveto="4" #use count starting at 1
+windowtomoveto="4" # Use count starting at 1
 
 ### User Variables END ###
 
